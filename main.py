@@ -159,9 +159,9 @@ class AutonomousAgent:
                     annotated_image = self.ui_scanner.draw_ui_overlay(
                         raw_image,
                         detected_elements,
-                        box_color=(0, 255, 0),  # Neon green
+                        api_color=(0, 255, 0),  # Corrigido
                         show_labels=True
-                    )
+)
                     annotated_image.save(SCREENSHOT_PATH)
                     
                     # Print element summary

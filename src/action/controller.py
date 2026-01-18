@@ -86,30 +86,23 @@ class DesktopController:
         
         # Playwright integration (optional)
         self.enable_playwright = enable_playwright
+        self.playwright_context = None
         self.browser = None
         self.page = None
+        self._connection_attempted = False
         
         if enable_playwright:
             try:
                 from playwright.sync_api import sync_playwright
-                self.playwright_context = sync_playwright().start()
-                # Try to connect to Chrome via CDP (Chrome DevTools Protocol)
-                # Chrome must be launched with --remote-debugging-port=9222
-                try:
-                    self.browser = self.playwright_context.chromium.connect_over_cdp(
-                        "http://localhost:9222"
-                    )
-                    if self.browser.contexts:
-                        context = self.browser.contexts[0]
-                        if context.pages:
-                            self.page = context.pages[0]
-                except Exception:
-                    # Browser not available yet, will connect later
-                    pass
+                self.playwright_available = True
+                print("   ✅ Playwright available for web automation")
             except ImportError:
-                self.enable_playwright = False
-            except Exception:
-                self.enable_playwright = False
+                self.playwright_available = False
+                print("   ⚠️  Playwright not installed (web automation disabled)")
+                print("      Install with: pip install playwright && playwright install chromium")
+            except Exception as e:
+                self.playwright_available = False
+                print(f"   ⚠️  Playwright error: {e}")
     
     def scale_coordinates(self, x: int, y: int) -> Tuple[int, int]:
         """
@@ -463,31 +456,99 @@ class DesktopController:
     
     def _ensure_browser_connection(self) -> bool:
         """
-        Ensure Playwright is connected to Chrome browser.
+        Ensure Playwright is connected to Chrome browser via CDP.
+        
+        Dynamically connects to Chrome when needed. Implements retry logic
+        to handle cases where Chrome is still initializing.
         
         Returns:
             True if browser is connected, False otherwise.
         """
-        if not self.enable_playwright:
+        if not self.enable_playwright or not hasattr(self, 'playwright_available') or not self.playwright_available:
             return False
         
+        # If already connected and page is valid, return True
+        if self.page is not None:
+            try:
+                # Verify the page is still valid
+                _ = self.page.url
+                return True
+            except Exception:
+                # Page became invalid, need to reconnect
+                self.page = None
+                self.browser = None
+        
+        # Attempt to connect to Chrome's CDP port
         try:
-            # Try to reconnect if not connected
-            if not self.browser or not self.page:
-                from playwright.sync_api import sync_playwright
-                if not hasattr(self, 'playwright_context'):
-                    self.playwright_context = sync_playwright().start()
-                
-                self.browser = self.playwright_context.chromium.connect_over_cdp(
-                    "http://localhost:9222"
-                )
-                if self.browser.contexts:
-                    context = self.browser.contexts[0]
-                    if context.pages:
-                        self.page = context.pages[0]
+            from playwright.sync_api import sync_playwright
+            import time
+            import socket
             
-            return self.page is not None
-        except Exception:
+            # Check if CDP port is accessible
+            def is_port_open(host: str = 'localhost', port: int = 9222, timeout: float = 1.0) -> bool:
+                """Check if Chrome's CDP port is accessible."""
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(timeout)
+                    result = sock.connect_ex((host, port))
+                    sock.close()
+                    return result == 0
+                except Exception:
+                    return False
+            
+            # Retry logic: Check if port is open (Chrome might still be starting)
+            max_retries = 3
+            retry_delay = 1.0
+            
+            for attempt in range(max_retries):
+                if is_port_open():
+                    break
+                if attempt < max_retries - 1:
+                    print(f"   ⏳ Chrome CDP port not ready, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(retry_delay)
+            else:
+                # Port never became available
+                print("   ⚠️  Chrome CDP port (9222) not accessible. Ensure Chrome is launched with --remote-debugging-port=9222")
+                return False
+            
+            # Initialize Playwright context if not already done
+            if not hasattr(self, 'playwright_context') or self.playwright_context is None:
+                self.playwright_context = sync_playwright().start()
+                print("   🎭 Playwright context started")
+            
+            # Connect to Chrome via CDP
+            try:
+                self.browser = self.playwright_context.chromium.connect_over_cdp("http://localhost:9222")
+                print("   🔗 Connected to Chrome via CDP")
+                
+                # Get the first available page (or create one if none exist)
+                contexts = self.browser.contexts
+                if contexts and len(contexts) > 0:
+                    context = contexts[0]
+                    pages = context.pages
+                    if pages and len(pages) > 0:
+                        self.page = pages[0]
+                        print(f"   📄 Using existing page: {self.page.url}")
+                    else:
+                        self.page = context.new_page()
+                        print("   📄 Created new page")
+                else:
+                    # No context available, this shouldn't happen with CDP connection
+                    print("   ⚠️  No browser context found")
+                    return False
+                
+                self._connection_attempted = True
+                return True
+                
+            except Exception as e:
+                print(f"   ❌ Failed to connect via CDP: {e}")
+                return False
+        
+        except ImportError:
+            print("   ⚠️  Playwright not available")
+            return False
+        except Exception as e:
+            print(f"   ❌ Browser connection error: {e}")
             return False
     
     def web_click(self, selector: str, timeout: int = 5000) -> None:
@@ -509,7 +570,10 @@ class DesktopController:
             >>> controller.web_click('#search-button')
         """
         if not self._ensure_browser_connection():
-            raise WebAutomationError("Playwright not connected to browser")
+            raise WebAutomationError(
+                "Cannot connect to Chrome. Ensure Chrome is running with: "
+                "chrome --force-renderer-accessibility --remote-debugging-port=9222"
+            )
         
         try:
             self.page.click(selector, timeout=timeout)
@@ -535,7 +599,10 @@ class DesktopController:
             >>> controller.web_type('#email', 'user@example.com', press_enter=True)
         """
         if not self._ensure_browser_connection():
-            raise WebAutomationError("Playwright not connected to browser")
+            raise WebAutomationError(
+                "Cannot connect to Chrome. Ensure Chrome is running with: "
+                "chrome --force-renderer-accessibility --remote-debugging-port=9222"
+            )
         
         try:
             self.page.fill(selector, text, timeout=timeout)
@@ -567,7 +634,10 @@ class DesktopController:
             ...     print(f"{elem['type']}: {elem['text'][:30]}")
         """
         if not self._ensure_browser_connection():
-            raise WebAutomationError("Playwright not connected to browser")
+            raise WebAutomationError(
+                "Cannot connect to Chrome. Ensure Chrome is running with: "
+                "chrome --force-renderer-accessibility --remote-debugging-port=9222"
+            )
         
         try:
             elements = []
@@ -637,10 +707,15 @@ class DesktopController:
         
         Call this when shutting down the controller.
         """
-        if self.enable_playwright and hasattr(self, 'playwright_context'):
-            try:
-                if self.browser:
-                    self.browser.close()
+        try:
+            if self.page:
+                self.page = None
+            if self.browser:
+                self.browser.close()
+                self.browser = None
+            if hasattr(self, 'playwright_context') and self.playwright_context:
                 self.playwright_context.stop()
-            except Exception:
-                pass
+                self.playwright_context = None
+            print("   🧹 Playwright connection closed")
+        except Exception as e:
+            print(f"   ⚠️  Error closing Playwright: {e}")

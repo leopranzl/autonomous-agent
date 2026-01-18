@@ -316,33 +316,17 @@ class UIScanner:
             
             # Only attempt deep scan for actual browsers
             if is_browser and not is_electron_app:
-                print("   🌐 Likely Browser - attempting optimized web scan...")
-                
+                print("   🌐 Likely Browser - checking accessibility...")
                 try:
-                    # CRITICAL: Set 1-second timeout to prevent blocking
                     auto.SetGlobalSearchTimeout(1)
-                    
-                    # Try to find the web content container
-                    render_widget = active_window.Control(
-                        searchDepth=8, 
-                        ClassName="Chrome_RenderWidgetHostHWND"
-                    )
-                    
-                    if render_widget:
-                        print("   ✅ Web content container found!")
-                        target_control = render_widget
-                        # Increase depth for DOM elements
-                        self.max_depth = 20
-                    else:
-                        print("   ⚠️  Web container not found (timeout) - scanning window frame only")
-                        
+                    # Em vez de mudar o target_control para o render_widget,
+                    # apenas aumentamos a profundidade para garantir que pegamos tudo.
+                    self.max_depth = 25 
                 except Exception as e:
-                    print(f"   ⚠️  Web scan error: {type(e).__name__} - falling back to window frame")
-                    
+                    print(f"   ⚠️  Scan adjustment error: {e}")
                 finally:
-                    # GUARANTEED RESTORATION of timeout (even if error occurred)
                     auto.SetGlobalSearchTimeout(10)
-            
+                        
             elif is_electron_app:
                 print(f"   🚫 Electron app detected - skipping deep scan")
             
