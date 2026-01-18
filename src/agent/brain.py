@@ -8,6 +8,7 @@ import os
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from src.utils.logger import TaskLogger
 
 # Load environment variables
 load_dotenv()
@@ -35,34 +36,54 @@ class GeminiAgent:
     SYSTEM_INSTRUCTION = """You are an expert AI Agent capable of controlling a Windows PC.
 
 CORE OPERATING RULES:
-1. **CHAINING COMMANDS (CRITICAL):**
-   - When opening applications, NEVER perform just one action and wait.
-   - You MUST send MULTIPLE function calls in a SINGLE response to perform a complete sequence.
-   - **Correct Sequence for Opening Apps:**
-     1. `press_key("win")`
-     2. `type_text("notepad")` (Wait 0.5s is handled by system)
-     3. `press_key("enter")`
-   - **Why?** Waiting for a screenshot between pressing 'win' and typing causes the menu to toggle open/closed due to UI animation latency.
+1. **CHAINING COMMANDS (MANDATORY):**
+   - EFFICIENCY IS KEY. Never perform a single action if you can chain them.
+   - Example: Multiple actions in ONE response.
 
-2. **Visual Navigation:**
-   - The screenshot has a RED GRID OVERLAY with coordinate labels (e.g., "100,200").
-   - Use these labels to ESTIMATE coordinates.
-   - If the screen is empty/desktop, assume you need to open the app via the 'win' key combo described above.
+2. **OPENING CHROME WITH ACCESSIBILITY (CRITICAL):**
+   - **NEVER** open Chrome via Start Menu search.
+   - **ALWAYS** use this exact sequence:
+     1. `hotkey(['win', 'r'])` to open Run dialog
+     2. `type_text('chrome --force-renderer-accessibility')`
+     3. `press_key('enter')`
+   - **WHY?** The `--force-renderer-accessibility` flag forces Chrome to expose HTML elements (buttons, links, forms) to the UI Scanner. Without this, you cannot see or click webpage elements by ID.
+   - This applies to ALL Chrome-related tasks (browsing websites, Instagram, YouTube, etc.).
 
-3. **Behavioral Guidelines:**
-   - If the user asks to "write a poem", do not try to write it in the void. Open Notepad first using the CHAINING method, wait for the next turn to see Notepad open, and THEN type the poem.
-   - Do not apologize or explain too much. Just execute.
-   - **CENTER BIAS:** Always aim for the visual CENTER of the UI element, not the edges.
-   - **OFFSET CORRECTION:** If a grid line or label covers the element, infer its position based on the surrounding visible parts.
+3. **APP-SPECIFIC STRATEGIES (PRIORITY):**
+
+   **A. FILE EXPLORER (SEARCHING):**
+   - If the user wants to SEARCH for a file/folder:
+     1. Look for an `EditControl` named "Search...", "Pesquisar...", or "Search box".
+     2. **CRITICAL:** You MUST call `click_element_by_id(id)` on that search box FIRST.
+     3. THEN chain `type_text("query", press_enter=True)`.
+   - Do NOT just type blindly. It will not search.
+
+   **B. WEB BROWSERS (CHROME/EDGE):**
+   - **Profile Picker:** If you see "Person 1"/"Guest", click the profile ID. Do NOT type URL.
+   - **Navigation:** If you see the browser is open:
+     1. Identify the Address Bar (usually `EditControl` 'Address and search bar' or 'Barra de endereços').
+     2. Call `click_element_by_id(id)` on it to focus.
+     3. Chain `type_text("url", press_enter=True)`.
+
+3. **VISUAL NAVIGATION (Set-of-Marks):**
+   - You will receive a text list of "DETECTED UI ELEMENTS" with IDs.
+   - **ALWAYS PREFER** using `click_element_by_id(element_id)` over coordinate clicks.
+   - **Reading the List:** Look for keywords in the element names (e.g., 'Submit', 'Search', 'Pesquisar').
+   - If an element seems to be a container (like a list item), clicking it selects it.
+
+4. **ERROR RECOVERY:**
+   - Review the `HISTORY`. If you tried typing and nothing happened, assume you lost focus.
+   - **Correction:** Click the target input field explicitly in the next turn.
 
 RESPONSE FORMAT:
-- Return a list of function calls to be executed in order.
+- Return a list of function calls.
 """
 
     def __init__(
         self,
         model_name: str = "gemini-2.0-flash-exp",
-        api_key: Optional[str] = None
+        api_key: Optional[str] = None,
+        logger: Optional[TaskLogger] = None
     ) -> None:
         """
         Initialize the Gemini agent with function calling capabilities.
@@ -70,6 +91,7 @@ RESPONSE FORMAT:
         Args:
             model_name: Gemini model to use. Default is "gemini-2.0-flash-exp".
             api_key: Google API key. If None, loads from GOOGLE_API_KEY env var.
+            logger: Optional TaskLogger instance for execution tracing.
         
         Raises:
             GeminiAgentError: If API key is missing or client initialization fails.
@@ -85,6 +107,9 @@ RESPONSE FORMAT:
             raise GeminiAgentError(
                 "Google API key not found. Set GOOGLE_API_KEY environment variable."
             )
+        
+        # Store logger
+        self.logger = logger
         
         try:
             # Initialize Google GenAI client
@@ -236,11 +261,36 @@ RESPONSE FORMAT:
             }
         )
         
+        click_element_by_id_declaration = types.FunctionDeclaration(
+            name="click_element_by_id",
+            description="PRECISE CLICK: Click a specific UI element by its numeric ID tag shown in the screenshot. PREFERRED over coordinate clicking when numbered tags are visible. The element ID comes from the Set-of-Marks visualization (green boxes with numbers).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "element_id": {
+                        "type": "integer",
+                        "description": "The numeric ID of the element to click (e.g., 1, 2, 3... as shown in the screenshot tags)"
+                    },
+                    "button": {
+                        "type": "string",
+                        "enum": ["left", "right", "middle"],
+                        "description": "Mouse button to click (default: left)"
+                    },
+                    "clicks": {
+                        "type": "integer",
+                        "description": "Number of clicks - 1 for single click, 2 for double click (default: 1)"
+                    }
+                },
+                "required": ["element_id"]
+            }
+        )
+        
         # Create Tool object with all function declarations
         tool = types.Tool(
             function_declarations=[
                 move_mouse_declaration,
                 click_element_declaration,
+                click_element_by_id_declaration,
                 type_text_declaration,
                 scroll_declaration,
                 press_key_declaration,
@@ -254,7 +304,8 @@ RESPONSE FORMAT:
         self,
         user_request: str,
         screenshot_path: str,
-        chat_history: Optional[List[Dict[str, Any]]] = None
+        chat_history: Optional[List[Dict[str, Any]]] = None,
+        detected_elements: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
         Analyze screenshot and determine actions based on user request.
@@ -264,30 +315,43 @@ RESPONSE FORMAT:
             with open(screenshot_path, "rb") as f:
                 image_data = f.read()
             
-            # --- CORREÇÃO: Construir o Contexto do Histórico ---
+            # --- CONSTRUÇÃO DO CONTEXTO (PROMPT) ---
             context_str = ""
+            
+            # 1. Adiciona Elementos Detectados (Set-of-Marks)
+            if detected_elements:
+                context_str += "DETECTED UI ELEMENTS (Set-of-Marks):\n"
+                context_str += "Use `click_element_by_id(id)` for these elements.\n"
+                # Limita a 50 elementos para não estourar o contexto ou confundir o modelo
+                for el in detected_elements[:50]: 
+                    # Ex: [1] Button 'Aceitar'
+                    context_str += f"[{el['id']}] {el['type']} '{el.get('name', 'Unknown')}'\n"
+                context_str += "-" * 40 + "\n\n"
+            
+            # 2. Adiciona Histórico
             if chat_history:
-                context_str = "HISTORY OF PREVIOUS ACTIONS (DO NOT REPEAT THESE STEPS IF SUCCESSFUL):\n"
-                for turn in chat_history:
-                    # Adiciona o que a IA decidiu fazer
+                context_str += "HISTORY OF PREVIOUS ACTIONS:\n"
+                for turn in chat_history[-5:]: # Mantém apenas os últimos 5 passos
                     if turn.get('function_calls'):
                         for call in turn['function_calls']:
                             context_str += f"- Action: {call['name']} args={call['args']}\n"
-                    
-                    # Adiciona o resultado da execução (feedback do sistema)
                     if turn.get('execution_results'):
                         for result in turn['execution_results']:
                              context_str += f"  Result: {result}\n"
-                
-                context_str += "\nCURRENT STATE ANALYSIS:\n"
-                context_str += "Based on the history above and the current screenshot, continue the task.\n"
-                context_str += "If the last action was 'open app', CHECK if the app is now visible before trying to open it again.\n"
+                context_str += "If the last action failed, try a different approach.\n"
                 context_str += "-" * 40 + "\n\n"
 
-            # Combina o histórico com o pedido do usuário
             full_prompt = context_str + "USER REQUEST: " + user_request
 
-            # Create the prompt with image and HISTORY
+            # LOG: Capture the complete prompt before sending (CRITICAL for debugging)
+            if self.logger:
+                self.logger.log_prompt(full_prompt, "FULL_CONTEXT")
+                self.logger.log_step(
+                    "Sending to Gemini API",
+                    f"Model: {self.model_name}\nTemperature: 0.1\nWith screenshot and {len(self.tools)} function tools"
+                )
+
+            # Create content
             contents = [
                 types.Content(
                     role="user",
@@ -296,12 +360,13 @@ RESPONSE FORMAT:
                             data=image_data,
                             mime_type="image/png"
                         ),
-                        types.Part.from_text(text=full_prompt) # Agora enviamos o histórico!
+                        types.Part.from_text(text=full_prompt)
                     ]
                 )
             ]
             
-            # Generate response with function calling
+            # Generate response
+            print("   🧠 Sending request to Gemini...")
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=contents,
@@ -312,15 +377,31 @@ RESPONSE FORMAT:
                 )
             )
             
-            # Parse response
+            # --- CORREÇÃO DE ERRO (NoneType) ---
+            # Verifica se a resposta foi bloqueada ou veio vazia
+            if not response.candidates or not response.candidates[0].content:
+                finish_reason = "UNKNOWN"
+                if response.candidates:
+                    finish_reason = response.candidates[0].finish_reason
+                
+                print(f"   ⚠️ Gemini returned empty response. Finish Reason: {finish_reason}")
+                return {
+                    "text_response": "I couldn't analyze the screen due to safety filters or an error. I will retry.",
+                    "function_calls": [], # Retorna lista vazia para não quebrar o main.py
+                    "finish_reason": finish_reason
+                }
+
+            # Parse response seguro
             result = {
                 "text_response": "",
                 "function_calls": [],
                 "finish_reason": response.candidates[0].finish_reason
             }
             
-            # Extract text and function calls
-            for part in response.candidates[0].content.parts:
+            # Garante que 'parts' é iterável
+            parts = response.candidates[0].content.parts or []
+            
+            for part in parts:
                 if part.text:
                     result["text_response"] += part.text
                 elif part.function_call:
@@ -329,9 +410,15 @@ RESPONSE FORMAT:
                         "args": dict(part.function_call.args)
                     })
             
+            # LOG: Capture the raw response (CRITICAL for debugging)
+            if self.logger:
+                self.logger.log_ai_response(result)
+            
             return result
         
         except Exception as e:
+            # Log de erro detalhado
+            print(f"   ❌ Error details: {str(e)}")
             raise GeminiAgentError(f"Failed to analyze screenshot: {e}")
     
     def chat(

@@ -7,5 +7,8 @@ pyautogui
 mss
 pillow
 
+# Windows UI Automation (Accessibility API)
+uiautomation
+
 # Environment and security
 python-dotenv
