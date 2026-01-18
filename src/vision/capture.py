@@ -63,7 +63,7 @@ class ScreenCapture:
             PIL Image object of the captured screen.
         
         Raises:
-            ScreenCaptureError: If screen capture fails.
+            ScreenCaptureError: If screen capture fails or screen is black/locked.
         
         Example:
             >>> capture = ScreenCapture()
@@ -81,8 +81,36 @@ class ScreenCapture:
                 screenshot.rgb
             )
             
+            # Check if screen is completely black (locked/off)
+            # Sample a few pixels to detect black screen
+            width, height = img.size
+            sample_points = [
+                (width // 4, height // 4),
+                (width // 2, height // 2),
+                (3 * width // 4, 3 * height // 4),
+                (width // 4, 3 * height // 4),
+                (3 * width // 4, height // 4)
+            ]
+            
+            # Check if all sample points are black or very dark
+            all_black = True
+            for x, y in sample_points:
+                pixel = img.getpixel((x, y))
+                # If any RGB channel is > 10, it's not completely black
+                if max(pixel) > 10:
+                    all_black = False
+                    break
+            
+            if all_black:
+                raise ScreenCaptureError(
+                    "Screen is black/locked. Please unlock the computer or ensure display is on."
+                )
+            
             return img
         
+        except ScreenCaptureError:
+            # Re-raise our custom errors
+            raise
         except Exception as e:
             raise ScreenCaptureError(f"Failed to capture screen: {e}")
     

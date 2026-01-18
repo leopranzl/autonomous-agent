@@ -1,3 +1,11 @@
 2026-01-18 16:51:55.307 scanner.py[130] scan_active_window -> Find Control Timeout(10s): {ClassName: 'Chrome_RenderWidgetHostHWND'}
 2026-01-18 16:52:23.862 scanner.py[130] scan_active_window -> Find Control Timeout(10s): {ClassName: 'Chrome_RenderWidgetHostHWND'}
 2026-01-18 16:52:42.040 scanner.py[130] scan_active_window -> Find Control Timeout(10s): {ClassName: 'Chrome_RenderWidgetHostHWND'}
+2026-01-18 16:57:44.212 scanner.py[130] scan_active_window -> Find Control Timeout(10s): {ClassName: 'Chrome_RenderWidgetHostHWND'}
+2026-01-18 16:57:59.678 scanner.py[130] scan_active_window -> Find Control Timeout(10s): {ClassName: 'Chrome_RenderWidgetHostHWND'}
+2026-01-18 16:58:14.457 scanner.py[130] scan_active_window -> Find Control Timeout(10s): {ClassName: 'Chrome_RenderWidgetHostHWND'}
+2026-01-18 17:02:00.998 scanner.py[130] scan_active_window -> Find Control Timeout(10s): {ClassName: 'Chrome_RenderWidgetHostHWND'}
+2026-01-18 17:02:34.395 scanner.py[130] scan_active_window -> Find Control Timeout(10s): {ClassName: 'Chrome_RenderWidgetHostHWND'}
+2026-01-18 17:02:54.524 scanner.py[130] scan_active_window -> Find Control Timeout(10s): {ClassName: 'Chrome_RenderWidgetHostHWND'}
+2026-01-18 17:07:57.570 scanner.py[161] scan_active_window -> Find Control Timeout(30s): {ClassName: 'Chrome_RenderWidgetHostHWND'}
+2026-01-18 17:08:50.926 scanner.py[161] scan_active_window -> Find Control Timeout(30s): {ClassName: 'Chrome_RenderWidgetHostHWND'}

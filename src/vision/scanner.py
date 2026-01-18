@@ -110,32 +110,64 @@ class UIScanner:
             window_class = active_window.ClassName or ""
             print(f"   Window: {window_name}")
             
-            # Special handling for Chrome: Find the web content container
-            is_chrome = "chrome" in window_class.lower() or "chrome" in window_name.lower()
-            if is_chrome:
-                print("   🌐 Detected Chrome - scanning for web content...")
-                # Look for Chrome_RenderWidgetHostHWND (web content container)
+            # Store original state
+            target_control = active_window  # Default to main window
+            original_max_depth = self.max_depth
+            
+            # STRICT BROWSER DETECTION (avoid false positives)
+            window_lower = window_name.lower()
+            is_browser = ("google chrome" in window_lower or 
+                         "microsoft edge" in window_lower or
+                         ("chrome" in window_lower and "chromium" not in window_lower))
+            
+            # EXPLICIT ELECTRON APP EXCLUSION
+            is_electron_app = any(app in window_lower for app in [
+                "visual studio code", "code -", "discord", "slack", 
+                "spotify", "teams", "electron"
+            ])
+            
+            # Only attempt deep scan for actual browsers
+            if is_browser and not is_electron_app:
+                print("   🌐 Likely Browser - attempting optimized web scan...")
+                
                 try:
-                    render_widget = active_window.Control(searchDepth=5, ClassName="Chrome_RenderWidgetHostHWND")
+                    # CRITICAL: Set 1-second timeout to prevent blocking
+                    auto.SetGlobalSearchTimeout(1)
+                    
+                    # Try to find the web content container
+                    render_widget = active_window.Control(
+                        searchDepth=8, 
+                        ClassName="Chrome_RenderWidgetHostHWND"
+                    )
+                    
                     if render_widget:
-                        print("   ✅ Found web content container - using deeper scan")
-                        active_window = render_widget
-                        # Increase max depth for web content
-                        original_max_depth = self.max_depth
-                        self.max_depth = max(20, self.max_depth)  # Ensure at least 20 for DOM
-                except Exception:
-                    print("   ⚠️  Web content container not found - using window root")
+                        print("   ✅ Web content container found!")
+                        target_control = render_widget
+                        # Increase depth for DOM elements
+                        self.max_depth = 20
+                    else:
+                        print("   ⚠️  Web container not found (timeout) - scanning window frame only")
+                        
+                except Exception as e:
+                    print(f"   ⚠️  Web scan error: {type(e).__name__} - falling back to window frame")
+                    
+                finally:
+                    # GUARANTEED RESTORATION of timeout (even if error occurred)
+                    auto.SetGlobalSearchTimeout(10)
+            
+            elif is_electron_app:
+                print(f"   🚫 Electron app detected - skipping deep scan")
             
             # Get window bounds for filtering
-            window_rect = active_window.BoundingRectangle
+            window_rect = target_control.BoundingRectangle
             
             # Collect all interactive elements
             elements = []
             element_id = 1
             
-            # Traverse UI tree
+            # Traverse UI tree with safe target
             self._traverse_ui_tree(
-                control=active_window,
+                control=target_control,
                 elements=elements,
                 element_id_ref=[element_id],  # Use list for mutable reference
                 window_rect=window_rect,
@@ -143,13 +175,17 @@ class UIScanner:
                 depth=0
             )
             
-            # Restore original max_depth if we modified it for Chrome
-            if is_chrome and 'original_max_depth' in locals():
-                self.max_depth = original_max_depth
+            # Restore original max_depth
+            self.max_depth = original_max_depth
             
             print(f"   Found {len(elements)} interactive elements")
-            if is_chrome and len(elements) > 0:
-                print("   💡 Tip: Chrome elements are clickable by ID if --force-renderer-accessibility was used")
+            
+            # Provide helpful context
+            if is_browser and len(elements) > 0:
+                if target_control != active_window:
+                    print("   💡 Tip: Chrome DOM elements detected - clickable by ID")
+                else:
+                    print("   💡 Tip: Browser frame detected - use address bar/back button")
             
             return elements
         
@@ -194,24 +230,30 @@ class UIScanner:
                     elements.append(element_info)
                     element_id_ref[0] += 1
             
-            # Traverse children
+            # Traverse children with timeout protection
             try:
+                # Reduce timeout for child enumeration to prevent freezing
                 children = control.GetChildren()
                 for child in children:
-                    self._traverse_ui_tree(
-                        control=child,
-                        elements=elements,
-                        element_id_ref=element_id_ref,
-                        window_rect=window_rect,
-                        include_offscreen=include_offscreen,
-                        depth=depth + 1
-                    )
+                    try:
+                        self._traverse_ui_tree(
+                            control=child,
+                            elements=elements,
+                            element_id_ref=element_id_ref,
+                            window_rect=window_rect,
+                            include_offscreen=include_offscreen,
+                            depth=depth + 1
+                        )
+                    except Exception:
+                        # Skip problematic child but continue with siblings
+                        continue
             except Exception:
-                # Some controls don't support GetChildren or may fail
+                # Some controls don't support GetChildren or may timeout
+                # Continue processing other elements
                 pass
         
         except Exception:
-            # Skip problematic controls
+            # Skip problematic controls entirely
             pass
     
     def _is_interactive(self, control: auto.Control) -> bool:

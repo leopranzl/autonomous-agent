@@ -245,6 +245,12 @@ class AutonomousAgent:
                 hotkey_str = "+".join(keys)
                 return f"Pressed hotkey: {hotkey_str}"
             
+            elif name == "wait":
+                seconds = args["seconds"]
+                print(f"   ⏳ Waiting {seconds} seconds for app to load...")
+                self.controller.wait(seconds)
+                return f"Waited for {seconds} seconds"
+            
             elif name == "click_element_by_id":
                 # Validate element_id is integer
                 element_id = args.get("element_id")

@@ -35,6 +35,12 @@ class GeminiAgent:
     # System instruction that defines the agent's behavior
     SYSTEM_INSTRUCTION = """You are an expert AI Agent capable of controlling a Windows PC.
 
+**ZERO STATE RULE (HIGHEST PRIORITY):**
+- If the user asks for a website (Instagram, YouTube, Google, etc.) AND you clearly see the Desktop (wallpaper, icons, empty screen):
+  **IMMEDIATELY** execute the 'Open Chrome' sequence.
+- If you see the Desktop but the task requires an app (e.g., "open notepad"), launch it via Win+R or Start Menu.
+- **NEVER** return an empty response. If confused, default to opening the required application.
+
 CORE OPERATING RULES:
 1. **CHAINING COMMANDS (MANDATORY):**
    - EFFICIENCY IS KEY. Never perform a single action if you can chain them.
@@ -42,11 +48,13 @@ CORE OPERATING RULES:
 
 2. **OPENING CHROME WITH ACCESSIBILITY (CRITICAL):**
    - **NEVER** open Chrome via Start Menu search.
-   - **ALWAYS** use this exact sequence:
+   - **ALWAYS** use this exact sequence (ALL IN ONE RESPONSE):
      1. `hotkey(['win', 'r'])` to open Run dialog
      2. `type_text('chrome --force-renderer-accessibility')`
      3. `press_key('enter')`
+     4. **`wait(seconds=6)`** <- MANDATORY. Chrome needs time to load.
    - **WHY?** The `--force-renderer-accessibility` flag forces Chrome to expose HTML elements (buttons, links, forms) to the UI Scanner. Without this, you cannot see or click webpage elements by ID.
+   - **WHY wait?** If you scan the screen immediately after launching, Chrome is still loading (blank window). The wait prevents scanning a blank screen and losing focus.
    - This applies to ALL Chrome-related tasks (browsing websites, Instagram, YouTube, etc.).
 
 3. **APP-SPECIFIC STRATEGIES (PRIORITY):**
@@ -65,13 +73,32 @@ CORE OPERATING RULES:
      2. Call `click_element_by_id(id)` on it to focus.
      3. Chain `type_text("url", press_enter=True)`.
 
-3. **VISUAL NAVIGATION (Set-of-Marks):**
+4. **INPUT FIELD DISAMBIGUATION (CRITICAL):**
+   - **SCENARIO:** You see multiple text boxes (e.g., a website's search bar vs. the Browser's Address Bar).
+   - **RULE:** If the user wants to **GO TO A WEBSITE** (e.g., "open instagram", "go to youtube"):
+     - You MUST target the **BROWSER CHROME ELEMENTS** (Top of the window).
+     - Look for keywords in the Element Name: `'Address'`, `'Barra de endereço'`, `'Search or enter web address'`, `'Address and search bar'`.
+     - **NEVER** type a URL into a field named `'Search'`, `'Chat'`, `'Message'`, `'Input'`, `'Ask'`, `'Type here'`, or `'Send a message'` unless it is explicitly the address bar.
+   
+   - **ANALYTICAL SELECTION:**
+     - If you are unsure which ID is the address bar, look for the element with `ControlTypeName: Edit` located at the **very top of the screen** (usually Y coordinate < 100).
+     - Browser chrome elements (address bar, tabs) are positioned in the window's header area.
+     - Web page content elements (chat boxes, search fields) are positioned in the central/lower area.
+   
+   - **CORRECTION STRATEGY:**
+     - If you typed into the wrong field, in your next turn:
+       1. Explicitly identify the correct Address Bar element by analyzing its Name and Position.
+       2. Call `click_element_by_id(id)` on the correct address bar.
+       3. Clear any wrong input with `hotkey(['ctrl', 'a'])` then `press_key('backspace')`.
+       4. Type the correct URL with `type_text("url", press_enter=True)`.
+
+5. **VISUAL NAVIGATION (Set-of-Marks):**
    - You will receive a text list of "DETECTED UI ELEMENTS" with IDs.
    - **ALWAYS PREFER** using `click_element_by_id(element_id)` over coordinate clicks.
    - **Reading the List:** Look for keywords in the element names (e.g., 'Submit', 'Search', 'Pesquisar').
    - If an element seems to be a container (like a list item), clicking it selects it.
 
-4. **ERROR RECOVERY:**
+6. **ERROR RECOVERY:**
    - Review the `HISTORY`. If you tried typing and nothing happened, assume you lost focus.
    - **Correction:** Click the target input field explicitly in the next turn.
 
@@ -285,6 +312,21 @@ RESPONSE FORMAT:
             }
         )
         
+        wait_declaration = types.FunctionDeclaration(
+            name="wait",
+            description="Pause execution for a specified duration. CRITICAL: MUST be called immediately after launching heavy applications (Chrome, Spotify, Visual Studio, etc.) to allow them to fully load and render before the next action. Prevents race conditions and blank screen scans.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "seconds": {
+                        "type": "integer",
+                        "description": "Number of seconds to wait. Use 5-8 seconds for browsers, 3-5 for lightweight apps."
+                    }
+                },
+                "required": ["seconds"]
+            }
+        )
+        
         # Create Tool object with all function declarations
         tool = types.Tool(
             function_declarations=[
@@ -294,7 +336,8 @@ RESPONSE FORMAT:
                 type_text_declaration,
                 scroll_declaration,
                 press_key_declaration,
-                hotkey_declaration
+                hotkey_declaration,
+                wait_declaration
             ]
         )
         
@@ -385,9 +428,37 @@ RESPONSE FORMAT:
                     finish_reason = response.candidates[0].finish_reason
                 
                 print(f"   ⚠️ Gemini returned empty response. Finish Reason: {finish_reason}")
+                
+                # LOG: Record the empty response error
+                if self.logger:
+                    self.logger.log_error(
+                        "GeminiEmptyResponse",
+                        f"Finish Reason: {finish_reason}\nUser Request: {user_request}"
+                    )
+                
+                # Check if user is requesting a website
+                website_keywords = ["http", "www", ".com", ".org", "instagram", "youtube", 
+                                   "facebook", "google", "twitter", "site", "website"]
+                is_website_request = any(keyword in user_request.lower() for keyword in website_keywords)
+                
+                if is_website_request:
+                    # Hardcoded reflex: Open Chrome when website requested but response is empty
+                    print("   💡 Detected website request - injecting Chrome launch sequence")
+                    return {
+                        "text_response": "I see a request for a website but the response was blocked. I will open Chrome now.",
+                        "function_calls": [
+                            {"name": "hotkey", "args": {"keys": ["win", "r"]}},
+                            {"name": "type_text", "args": {"text": "chrome --force-renderer-accessibility"}},
+                            {"name": "press_key", "args": {"key": "enter"}},
+                            {"name": "wait", "args": {"seconds": 6}}
+                        ],
+                        "finish_reason": finish_reason
+                    }
+                
+                # Generic fallback for other blocked responses
                 return {
                     "text_response": "I couldn't analyze the screen due to safety filters or an error. I will retry.",
-                    "function_calls": [], # Retorna lista vazia para não quebrar o main.py
+                    "function_calls": [],
                     "finish_reason": finish_reason
                 }
 

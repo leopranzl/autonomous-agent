@@ -401,3 +401,25 @@ class DesktopController:
         self.ai_image_height = height
         self.scale_x = self.screen_width / self.ai_image_width
         self.scale_y = self.screen_height / self.ai_image_height
+    
+    def wait(self, seconds: int) -> None:
+        """
+        Pause execution for a specified number of seconds.
+        
+        Use this after launching applications to allow them to load and render.
+        This prevents race conditions where the agent tries to interact with
+        UI elements before the application is ready.
+        
+        Args:
+            seconds: Number of seconds to wait.
+        
+        Example:
+            >>> controller = DesktopController()
+            >>> # Launch Chrome
+            >>> controller.hotkey('win', 'r')
+            >>> controller.type_text('chrome')
+            >>> controller.press_key('enter')
+            >>> # Wait for Chrome to fully load
+            >>> controller.wait(5)
+        """
+        time.sleep(seconds)
