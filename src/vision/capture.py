@@ -140,7 +140,7 @@ class ScreenCapture:
             
             # Try to load a font, fallback to default if not available
             try:
-                font = ImageFont.truetype("arial.ttf", 12)
+                font = ImageFont.truetype("arial.ttf", 10)
             except Exception:
                 font = ImageFont.load_default()
             
@@ -176,7 +176,7 @@ class ScreenCapture:
                     # Draw semi-transparent background for text readability
                     draw.rectangle(
                         bbox,
-                        fill=(0, 0, 0, 150)
+                        fill=(0, 0, 0, 80)
                     )
                     
                     # Draw coordinate text

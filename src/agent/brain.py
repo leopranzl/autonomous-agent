@@ -32,37 +32,32 @@ class GeminiAgent:
     """
     
     # System instruction that defines the agent's behavior
-    SYSTEM_INSTRUCTION = """You are an expert computer operator AI agent with visual understanding capabilities.
+    SYSTEM_INSTRUCTION = """You are an expert AI Agent capable of controlling a Windows PC.
 
-Your Mission:
-- Analyze screenshots with coordinate grid overlays to understand the user interface
-- Identify UI elements (buttons, links, text fields, etc.) based on user requests
-- Determine precise X,Y coordinates using the visible grid labels (e.g., "100,200")
-- Call appropriate tools/functions to interact with the screen
+CORE OPERATING RULES:
+1. **CHAINING COMMANDS (CRITICAL):**
+   - When opening applications, NEVER perform just one action and wait.
+   - You MUST send MULTIPLE function calls in a SINGLE response to perform a complete sequence.
+   - **Correct Sequence for Opening Apps:**
+     1. `press_key("win")`
+     2. `type_text("notepad")` (Wait 0.5s is handled by system)
+     3. `press_key("enter")`
+   - **Why?** Waiting for a screenshot between pressing 'win' and typing causes the menu to toggle open/closed due to UI animation latency.
 
-Coordinate Guidelines:
-- The screenshot has a RED GRID OVERLAY with coordinate labels at intersections
-- Read these labels carefully to estimate exact positions
-- Grid spacing is typically 100 pixels
-- Use the grid to calculate positions between labeled points
-- ALWAYS provide coordinates in the AI image space (the image you see)
+2. **Visual Navigation:**
+   - The screenshot has a RED GRID OVERLAY with coordinate labels (e.g., "100,200").
+   - Use these labels to ESTIMATE coordinates.
+   - If the screen is empty/desktop, assume you need to open the app via the 'win' key combo described above.
 
-Action Strategy:
-1. Carefully observe the screenshot and locate the target element
-2. Use the grid overlay to determine coordinates
-3. Choose the appropriate tool (click_element, type_text, scroll, etc.)
-4. Provide accurate parameters for the tool
+3. **Behavioral Guidelines:**
+   - If the user asks to "write a poem", do not try to write it in the void. Open Notepad first using the CHAINING method, wait for the next turn to see Notepad open, and THEN type the poem.
+   - Do not apologize or explain too much. Just execute.
+   - **CENTER BIAS:** Always aim for the visual CENTER of the UI element, not the edges.
+   - **OFFSET CORRECTION:** If a grid line or label covers the element, infer its position based on the surrounding visible parts.
 
-Safety Rules:
-- Double-check coordinates before calling click_element
-- Be precise with text input for type_text
-- Explain your reasoning briefly when selecting coordinates
-- If unsure about location, ask for clarification instead of guessing
-
-Response Format:
-- When you identify an element, explain WHERE you see it (e.g., "I see the login button at approximately 520,340 based on the grid")
-- Then call the appropriate tool with exact coordinates
-- Be concise but clear in your explanations"""
+RESPONSE FORMAT:
+- Return a list of function calls to be executed in order.
+"""
 
     def __init__(
         self,
@@ -263,40 +258,36 @@ Response Format:
     ) -> Dict[str, Any]:
         """
         Analyze screenshot and determine actions based on user request.
-        
-        This is the main method that sends the screenshot to Gemini,
-        gets function calls, and returns the actions to take.
-        
-        Args:
-            user_request: User's instruction (e.g., "Click the login button").
-            screenshot_path: Path to screenshot image with grid overlay.
-            chat_history: Optional conversation history for context.
-        
-        Returns:
-            Dictionary containing:
-                - 'text_response': AI's text explanation
-                - 'function_calls': List of function calls to execute
-                - 'finish_reason': Reason generation stopped
-        
-        Raises:
-            GeminiAgentError: If analysis fails.
-        
-        Example:
-            >>> agent = GeminiAgent()
-            >>> result = agent.analyze_and_act(
-            ...     "Click the submit button",
-            ...     "screenshot_with_grid.png"
-            ... )
-            >>> print(result['text_response'])
-            >>> for call in result['function_calls']:
-            ...     print(f"Call {call['name']} with {call['args']}")
         """
         try:
             # Upload the image
             with open(screenshot_path, "rb") as f:
                 image_data = f.read()
             
-            # Create the prompt with image
+            # --- CORREÇÃO: Construir o Contexto do Histórico ---
+            context_str = ""
+            if chat_history:
+                context_str = "HISTORY OF PREVIOUS ACTIONS (DO NOT REPEAT THESE STEPS IF SUCCESSFUL):\n"
+                for turn in chat_history:
+                    # Adiciona o que a IA decidiu fazer
+                    if turn.get('function_calls'):
+                        for call in turn['function_calls']:
+                            context_str += f"- Action: {call['name']} args={call['args']}\n"
+                    
+                    # Adiciona o resultado da execução (feedback do sistema)
+                    if turn.get('execution_results'):
+                        for result in turn['execution_results']:
+                             context_str += f"  Result: {result}\n"
+                
+                context_str += "\nCURRENT STATE ANALYSIS:\n"
+                context_str += "Based on the history above and the current screenshot, continue the task.\n"
+                context_str += "If the last action was 'open app', CHECK if the app is now visible before trying to open it again.\n"
+                context_str += "-" * 40 + "\n\n"
+
+            # Combina o histórico com o pedido do usuário
+            full_prompt = context_str + "USER REQUEST: " + user_request
+
+            # Create the prompt with image and HISTORY
             contents = [
                 types.Content(
                     role="user",
@@ -305,7 +296,7 @@ Response Format:
                             data=image_data,
                             mime_type="image/png"
                         ),
-                        types.Part.from_text(text=user_request)
+                        types.Part.from_text(text=full_prompt) # Agora enviamos o histórico!
                     ]
                 )
             ]
@@ -317,7 +308,7 @@ Response Format:
                 config=types.GenerateContentConfig(
                     system_instruction=self.SYSTEM_INSTRUCTION,
                     tools=self.tools,
-                    temperature=0.1,  # Low temperature for precise actions
+                    temperature=0.1, 
                 )
             )
             

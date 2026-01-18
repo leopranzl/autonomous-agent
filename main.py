@@ -14,6 +14,13 @@ from dotenv import load_dotenv
 from src.vision.capture import ScreenCapture, ScreenCaptureError
 from src.action.controller import DesktopController, DesktopControllerError
 from src.agent.brain import GeminiAgent, GeminiAgentError
+import ctypes
+
+# Forçar o Windows a reportar a resolução real para o Python
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(1)
+except Exception:
+    ctypes.windll.user32.SetProcessDPIAware()
 
 
 # Configuration
@@ -49,7 +56,7 @@ class AutonomousAgent:
         # Initialize screen capture
         print("📸 Initializing screen capture...")
         self.screen_capture = ScreenCapture(
-            grid_spacing=100,
+            grid_spacing=50,  # ALTA PRECISÃO: Mudado de 100 para 50
             grid_color=(255, 0, 0),
             grid_alpha=180
         )
@@ -195,7 +202,8 @@ class AutonomousAgent:
             try:
                 # Step A: Capture screen with grid overlay
                 screenshot_path = self.capture_screen_with_grid()
-                
+                time.sleep(1.0) # Adicione esta linha
+
                 # Small delay for stability
                 time.sleep(0.5)
                 
@@ -225,7 +233,7 @@ class AutonomousAgent:
                         print(f"   ✅ {result_msg}")
                         
                         # Small delay between actions
-                        time.sleep(0.3)
+                        time.sleep(2)
                     
                     # Add to conversation history
                     self.history.append({
