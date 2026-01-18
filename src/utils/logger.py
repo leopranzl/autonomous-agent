@@ -162,6 +162,53 @@ class TaskLogger:
             format_json=True
         )
     
+    def log_thought(self, thought: str):
+        """
+        Log the agent's reasoning/thought process (ReAct pattern).
+        
+        Args:
+            thought: The agent's reasoning before taking action.
+        """
+        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        
+        with open(self.log_file, "a", encoding="utf-8") as f:
+            f.write(f"\n[{timestamp}] 💭 AGENT THOUGHT (ReAct)\n")
+            f.write(f"{thought}\n")
+            f.write("-" * 80 + "\n")
+    
+    def log_plan(self, plan: List[str], plan_type: str = "INITIAL"):
+        """
+        Log a hierarchical plan.
+        
+        Args:
+            plan: List of sub-goal strings.
+            plan_type: Type of plan (e.g., "INITIAL", "UPDATED", "RE-PLANNED").
+        """
+        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        
+        with open(self.log_file, "a", encoding="utf-8") as f:
+            f.write(f"\n[{timestamp}] 📋 {plan_type} PLAN\n")
+            for i, subgoal in enumerate(plan, 1):
+                f.write(f"   {i}. {subgoal}\n")
+            f.write("-" * 80 + "\n")
+    
+    def log_subgoal_progress(self, current_index: int, total: int, subgoal: str, status: str):
+        """
+        Log sub-goal progress.
+        
+        Args:
+            current_index: Current sub-goal index (0-based).
+            total: Total number of sub-goals.
+            subgoal: Current sub-goal description.
+            status: Status (e.g., "IN_PROGRESS", "COMPLETED", "IMPOSSIBLE").
+        """
+        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        
+        with open(self.log_file, "a", encoding="utf-8") as f:
+            f.write(f"\n[{timestamp}] 🎯 SUB-GOAL {status} [{current_index + 1}/{total}]\n")
+            f.write(f"   {subgoal}\n")
+            f.write("-" * 80 + "\n")
+    
     def log_function_calls(self, function_calls: List[Dict[str, Any]]):
         """
         Log function calls to be executed.

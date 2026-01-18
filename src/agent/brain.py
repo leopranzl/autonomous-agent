@@ -33,7 +33,7 @@ class GeminiAgent:
     """
     
     # System instruction that defines the agent's behavior
-    SYSTEM_INSTRUCTION = """You are an expert AI Agent capable of controlling a Windows PC.
+    SYSTEM_INSTRUCTION = r"""You are an expert AI Agent capable of controlling a Windows PC.
 
 **ZERO STATE RULE (HIGHEST PRIORITY):**
 - If the user asks for a website (Instagram, YouTube, Google, etc.) AND you clearly see the Desktop (wallpaper, icons, empty screen):
@@ -50,10 +50,11 @@ CORE OPERATING RULES:
    - **NEVER** open Chrome via Start Menu search.
    - **ALWAYS** use this exact sequence (ALL IN ONE RESPONSE):
      1. `hotkey(['win', 'r'])` to open Run dialog
-     2. `type_text('chrome --force-renderer-accessibility')`
+     2. `type_text('chrome --force-renderer-accessibility --remote-debugging-port=9222')`
      3. `press_key('enter')`
-     4. **`wait(seconds=6)`** <- MANDATORY. Chrome needs time to load.
+     4. **`wait(seconds=3)`** <- MANDATORY. Chrome needs time to load.
    - **WHY?** The `--force-renderer-accessibility` flag forces Chrome to expose HTML elements (buttons, links, forms) to the UI Scanner. Without this, you cannot see or click webpage elements by ID.
+   - **WHY remote-debugging-port?** Enables Playwright to connect for precise web automation via CSS selectors.
    - **WHY wait?** If you scan the screen immediately after launching, Chrome is still loading (blank window). The wait prevents scanning a blank screen and losing focus.
    - This applies to ALL Chrome-related tasks (browsing websites, Instagram, YouTube, etc.).
 
@@ -72,6 +73,52 @@ CORE OPERATING RULES:
      1. Identify the Address Bar (usually `EditControl` 'Address and search bar' or 'Barra de endereços').
      2. Call `click_element_by_id(id)` on it to focus.
      3. Chain `type_text("url", press_enter=True)`.
+
+   **C. FILE PICKER / UPLOAD DIALOGS (MANDATORY):**
+   - **Scenario:** You see a Windows File Explorer dialog (titles like "Open", "Abrir", "Save As", "Salvar como").
+   - **Goal:** Select a specific file for upload or opening.
+   - **STRATEGY:** DO NOT click folders to navigate. DO NOT search for file icons visually.
+     1. Identify the `EditControl` labeled "File name:", "Nome do arquivo:", "Nome:", or just a text box near the bottom of the dialog.
+     2. **Action 1:** `click_element_by_id(id)` on this file name text box to focus it.
+     3. **Action 2:** `type_text("C:\\Full\\Path\\To\\File.ext", press_enter=True)` with the COMPLETE absolute path.
+   - **Reasoning:** Typing the absolute path is 100% reliable, instant, and skips all navigation steps. No need to traverse Desktop → Pictures → Subfolder.
+   - **Example:** Instead of clicking through folders, just type: `C:\Users\Username\Pictures\photo.jpg`
+
+   **D. WEB APP SEARCHING (KEYBOARD SHORTCUTS - PRIORITY):**
+   - **Scenario:** User wants to search INSIDE a website like LinkedIn, YouTube, Gmail, Twitter/X, GitHub, Reddit.
+   - **Problem:** Clicking search bars visually is fragile (coordinates shift, IDs change, click misses target).
+   - **SOLUTION:** Use the universal `/` (forward slash) keyboard shortcut.
+   - **STRATEGY:**
+     1. **DO NOT** try to click the search bar element visually.
+     2. **Action 1:** `type_text("/")` - This instantly focuses the search bar on most modern web apps.
+     3. **Action 2:** `wait(1)` - Brief pause for focus animation to complete.
+     4. **Action 3:** `type_text("your search query", press_enter=True)` - Type and submit.
+   - **Why this works:** The `/` shortcut is hardcoded into these sites' JavaScript and is 100% reliable regardless of page layout changes.
+   - **Supported sites:** LinkedIn, YouTube, Gmail, Twitter/X, GitHub, Reddit, Facebook, Instagram (when logged in).
+   - **Example:** To search LinkedIn for "AI Engineer jobs":
+     ```
+     type_text("/")
+     wait(1)
+     type_text("AI Engineer jobs", press_enter=True)
+     ```
+
+   **E. PLAYWRIGHT WEB AUTOMATION (HIGHEST PRECISION - USE WHEN AVAILABLE):**
+   - **When to use:** If Chrome is running AND you're interacting with a WEB PAGE (not Windows UI).
+   - **Advantages:** CSS selectors are more reliable than visual clicking. Works even when page layout changes.
+   - **Priority Order:**
+     1. **FIRST CHOICE:** Use `web_click(selector)` and `web_type(selector, text)` for web interactions.
+     2. **FALLBACK:** If web tools fail or element has no good selector, use `click_element_by_id`.
+     3. **LAST RESORT:** Use coordinate clicking only if both above fail.
+   - **How to get selectors:**
+     - Call `web_get_elements()` to see available interactive elements with their selectors.
+     - Or construct selectors manually: `button:has-text("Login")`, `input[name="email"]`, `#submit-btn`.
+   - **Example workflow:**
+     ```
+     web_click('button:has-text("Sign In")')
+     web_type('input[name="email"]', 'user@example.com')
+     web_type('input[type="password"]', 'mypassword', press_enter=True)
+     ```
+   - **Important:** These tools ONLY work when Chrome is launched with `--remote-debugging-port=9222`.
 
 4. **INPUT FIELD DISAMBIGUATION (CRITICAL):**
    - **SCENARIO:** You see multiple text boxes (e.g., a website's search bar vs. the Browser's Address Bar).
@@ -102,8 +149,40 @@ CORE OPERATING RULES:
    - Review the `HISTORY`. If you tried typing and nothing happened, assume you lost focus.
    - **Correction:** Click the target input field explicitly in the next turn.
 
+7. **REASONING BEFORE ACTING (ReAct Pattern - MANDATORY):**
+   - **CRITICAL:** You MUST output your reasoning/thought process BEFORE calling functions.
+   - First, provide a `thought` text block explaining:
+     1. What you observe in the screenshot.
+     2. What the current state is.
+     3. Why you're choosing specific actions.
+     4. What you expect to happen.
+   - Then, call the appropriate functions.
+   - **Self-Correction:** If you notice HISTORY shows repeated failures or no state change, you MUST try a different approach:
+     - If `click_element_by_id` failed → try coordinate clicking
+     - If clicking failed → try keyboard shortcuts
+     - If typing had no effect → explicitly click to focus first
+     - If stuck → try scrolling or pressing Escape to reset
+
+8. **HIERARCHICAL PLANNING (FOR COMPLEX TASKS):**
+   - **When you receive a PLAN:** You will see "CURRENT PLAN" and "CURRENT SUB-GOAL" in the context.
+   - **Your responsibility:** Focus ONLY on completing the current sub-goal. Ignore other sub-goals for now.
+   - **Plan awareness:**
+     - Understand where you are in the overall task (e.g., "Step 2 of 5").
+     - Check if the current sub-goal is achievable given the current screen state.
+     - If the sub-goal is complete, state "SUB-GOAL COMPLETE" in your response.
+   - **Re-planning trigger:**
+     - If the current sub-goal is IMPOSSIBLE (e.g., "Click button X" but button X doesn't exist), state "SUB-GOAL IMPOSSIBLE: [reason]".
+     - The system will re-plan automatically.
+   - **Example:**
+     - Plan: ["1. Open Chrome", "2. Navigate to Gmail", "3. Click Compose", "4. Write email"]
+     - Current Sub-goal: "2. Navigate to Gmail"
+     - Your focus: Only work on navigating to Gmail. Once URL bar shows gmail.com, say "SUB-GOAL COMPLETE".
+
 RESPONSE FORMAT:
-- Return a list of function calls.
+- Start with a clear thought/reasoning statement.
+- If working on a sub-goal, mention your progress.
+- Follow with a list of function calls.
+- Example: "I can see Chrome is open with the address bar visible (element #5). I will click it to focus, then type the URL."
 """
 
     def __init__(
@@ -327,6 +406,68 @@ RESPONSE FORMAT:
             }
         )
         
+        # Playwright Web Automation Tools
+        web_click_declaration = types.FunctionDeclaration(
+            name="web_click",
+            description="PRECISE WEB CLICK: Click a web element using CSS selector (Playwright). PREFERRED over coordinate clicking for web pages. Works only when Chrome is running with --remote-debugging-port=9222. More reliable than visual clicking for dynamic web content.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector of the element to click (e.g., 'button.submit', '#login-btn', 'a[href=\"/home\"]')"
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Maximum wait time in milliseconds (default: 5000)"
+                    }
+                },
+                "required": ["selector"]
+            }
+        )
+        
+        web_type_declaration = types.FunctionDeclaration(
+            name="web_type",
+            description="PRECISE WEB TYPING: Type text into a web input field using CSS selector (Playwright). PREFERRED over regular typing for web forms. Works only when Chrome is running with --remote-debugging-port=9222.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector of the input element (e.g., 'input[name=\"email\"]', '#search-box', 'textarea.message')"
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Text to type into the field"
+                    },
+                    "press_enter": {
+                        "type": "boolean",
+                        "description": "Whether to press Enter after typing (default: false)"
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Maximum wait time in milliseconds (default: 5000)"
+                    }
+                },
+                "required": ["selector", "text"]
+            }
+        )
+        
+        web_get_elements_declaration = types.FunctionDeclaration(
+            name="web_get_elements",
+            description="GET WEB ELEMENTS: Retrieve interactive web elements from current page using Playwright accessibility tree. Returns list of clickable/typeable elements with their selectors. Use this to discover available actions on a web page.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "max_elements": {
+                        "type": "integer",
+                        "description": "Maximum number of elements to return (default: 50)"
+                    }
+                },
+                "required": []
+            }
+        )
+        
         # Create Tool object with all function declarations
         tool = types.Tool(
             function_declarations=[
@@ -337,11 +478,108 @@ RESPONSE FORMAT:
                 scroll_declaration,
                 press_key_declaration,
                 hotkey_declaration,
-                wait_declaration
+                wait_declaration,
+                web_click_declaration,
+                web_type_declaration,
+                web_get_elements_declaration
             ]
         )
         
         return [tool]
+    
+    def generate_plan(
+        self,
+        user_request: str,
+        screenshot_path: Optional[str] = None
+    ) -> List[str]:
+        """
+        Generate a hierarchical plan (list of sub-goals) for a complex task.
+        
+        Args:
+            user_request: High-level task description.
+            screenshot_path: Optional screenshot for context.
+        
+        Returns:
+            List of sub-goal strings (e.g., ["Open Chrome", "Navigate to site", ...]).
+        
+        Example:
+            >>> agent = GeminiAgent()
+            >>> plan = agent.generate_plan("Send an email to John about the meeting")
+            >>> # Returns: ["1. Open Chrome", "2. Navigate to Gmail", "3. Click Compose", ...]
+        """
+        try:
+            planning_prompt = f"""You are a task planning AI. Given a high-level task, break it down into a sequential list of concrete sub-goals.
+
+RULES:
+1. Each sub-goal should be a single, achievable action.
+2. Number each sub-goal (1., 2., 3., ...).
+3. Be specific (e.g., "Open Chrome" not "Open browser").
+4. Keep it under 10 steps if possible.
+5. Focus on USER-FACING actions, not implementation details.
+
+TASK: {user_request}
+
+Generate the plan as a numbered list. Output ONLY the numbered list, nothing else.
+"""
+            
+            parts = [types.Part.from_text(text=planning_prompt)]
+            
+            # Add screenshot if provided for context
+            if screenshot_path:
+                with open(screenshot_path, "rb") as f:
+                    image_data = f.read()
+                parts.insert(0, types.Part.from_bytes(
+                    data=image_data,
+                    mime_type="image/png"
+                ))
+            
+            contents = [types.Content(role="user", parts=parts)]
+            
+            # Generate plan without function calling
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    temperature=0.3  # Lower temperature for more consistent planning
+                )
+            )
+            
+            # Parse the response into a list of sub-goals
+            plan_text = response.text
+            lines = [line.strip() for line in plan_text.split('\n') if line.strip()]
+            
+            # Extract numbered items
+            plan = []
+            for line in lines:
+                # Match patterns like "1.", "1)", "Step 1:", etc.
+                if any(line.startswith(f"{i}.") or line.startswith(f"{i})") or line.startswith(f"Step {i}") for i in range(1, 20)):
+                    # Clean up the numbering
+                    clean_line = line
+                    for prefix in ["Step ", "step "]:
+                        if prefix in clean_line:
+                            clean_line = clean_line.split(prefix, 1)[1]
+                    # Remove leading numbers and punctuation
+                    for i in range(20):
+                        for sep in [f"{i}. ", f"{i}) ", f"{i}: "]:
+                            if clean_line.startswith(sep):
+                                clean_line = clean_line[len(sep):]
+                    plan.append(clean_line)
+            
+            # Log the generated plan
+            if self.logger:
+                self.logger.log_data(
+                    "GENERATED PLAN",
+                    {"task": user_request, "plan": plan},
+                    format_json=True
+                )
+            
+            return plan if plan else [user_request]  # Fallback to original task if parsing fails
+            
+        except Exception as e:
+            # If planning fails, return the original task as a single-step plan
+            if self.logger:
+                self.logger.log_error("PlanGenerationError", str(e))
+            return [user_request]
     
     def analyze_and_act(
         self,

@@ -1,9 +1,10 @@
 """
 Action Controller Module
 Safe desktop automation with coordinate scaling for AI-driven control.
+Includes Playwright integration for precise web interaction.
 """
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Dict, Any
 import pyautogui
 import time
 
@@ -15,6 +16,11 @@ class DesktopControllerError(Exception):
 
 class CoordinateOutOfBoundsError(DesktopControllerError):
     """Exception raised when coordinates are outside screen bounds."""
+    pass
+
+
+class WebAutomationError(DesktopControllerError):
+    """Exception raised when web automation (Playwright) fails."""
     pass
 
 
@@ -38,7 +44,8 @@ class DesktopController:
         ai_image_width: Optional[int] = None,
         ai_image_height: Optional[int] = None,
         action_delay: float = 0.5,
-        failsafe: bool = True
+        failsafe: bool = True,
+        enable_playwright: bool = True
     ) -> None:
         """
         Initialize the DesktopController with safety settings.
@@ -48,6 +55,7 @@ class DesktopController:
             ai_image_height: Height of image sent to AI (None = no scaling).
             action_delay: Delay between actions in seconds. Default is 0.5.
             failsafe: Enable PyAutoGUI failsafe (move to corner to abort).
+            enable_playwright: Enable Playwright for web automation. Default is True.
         
         Example:
             >>> # AI analyzes 1024x768 image, but screen is 1920x1080
@@ -75,6 +83,33 @@ class DesktopController:
         # Calculate scaling factors
         self.scale_x = self.screen_width / self.ai_image_width
         self.scale_y = self.screen_height / self.ai_image_height
+        
+        # Playwright integration (optional)
+        self.enable_playwright = enable_playwright
+        self.browser = None
+        self.page = None
+        
+        if enable_playwright:
+            try:
+                from playwright.sync_api import sync_playwright
+                self.playwright_context = sync_playwright().start()
+                # Try to connect to Chrome via CDP (Chrome DevTools Protocol)
+                # Chrome must be launched with --remote-debugging-port=9222
+                try:
+                    self.browser = self.playwright_context.chromium.connect_over_cdp(
+                        "http://localhost:9222"
+                    )
+                    if self.browser.contexts:
+                        context = self.browser.contexts[0]
+                        if context.pages:
+                            self.page = context.pages[0]
+                except Exception:
+                    # Browser not available yet, will connect later
+                    pass
+            except ImportError:
+                self.enable_playwright = False
+            except Exception:
+                self.enable_playwright = False
     
     def scale_coordinates(self, x: int, y: int) -> Tuple[int, int]:
         """
@@ -423,3 +458,189 @@ class DesktopController:
             >>> controller.wait(5)
         """
         time.sleep(seconds)
+    
+    # ========== PLAYWRIGHT WEB AUTOMATION METHODS ==========
+    
+    def _ensure_browser_connection(self) -> bool:
+        """
+        Ensure Playwright is connected to Chrome browser.
+        
+        Returns:
+            True if browser is connected, False otherwise.
+        """
+        if not self.enable_playwright:
+            return False
+        
+        try:
+            # Try to reconnect if not connected
+            if not self.browser or not self.page:
+                from playwright.sync_api import sync_playwright
+                if not hasattr(self, 'playwright_context'):
+                    self.playwright_context = sync_playwright().start()
+                
+                self.browser = self.playwright_context.chromium.connect_over_cdp(
+                    "http://localhost:9222"
+                )
+                if self.browser.contexts:
+                    context = self.browser.contexts[0]
+                    if context.pages:
+                        self.page = context.pages[0]
+            
+            return self.page is not None
+        except Exception:
+            return False
+    
+    def web_click(self, selector: str, timeout: int = 5000) -> None:
+        """
+        Click a web element using CSS selector (Playwright).
+        
+        More precise than coordinate-based clicking for web elements.
+        
+        Args:
+            selector: CSS selector (e.g., 'button.submit', '#login-btn').
+            timeout: Maximum wait time in milliseconds. Default is 5000.
+        
+        Raises:
+            WebAutomationError: If element not found or click fails.
+        
+        Example:
+            >>> controller = DesktopController()
+            >>> controller.web_click('button[type="submit"]')
+            >>> controller.web_click('#search-button')
+        """
+        if not self._ensure_browser_connection():
+            raise WebAutomationError("Playwright not connected to browser")
+        
+        try:
+            self.page.click(selector, timeout=timeout)
+        except Exception as e:
+            raise WebAutomationError(f"Failed to click element '{selector}': {e}")
+    
+    def web_type(self, selector: str, text: str, timeout: int = 5000, press_enter: bool = False) -> None:
+        """
+        Type text into a web element using CSS selector (Playwright).
+        
+        Args:
+            selector: CSS selector of input field.
+            text: Text to type.
+            timeout: Maximum wait time in milliseconds. Default is 5000.
+            press_enter: Whether to press Enter after typing. Default is False.
+        
+        Raises:
+            WebAutomationError: If element not found or typing fails.
+        
+        Example:
+            >>> controller = DesktopController()
+            >>> controller.web_type('input[name="search"]', 'Python tutorials')
+            >>> controller.web_type('#email', 'user@example.com', press_enter=True)
+        """
+        if not self._ensure_browser_connection():
+            raise WebAutomationError("Playwright not connected to browser")
+        
+        try:
+            self.page.fill(selector, text, timeout=timeout)
+            if press_enter:
+                self.page.press(selector, "Enter")
+        except Exception as e:
+            raise WebAutomationError(f"Failed to type into element '{selector}': {e}")
+    
+    def web_get_elements(self, max_elements: int = 50) -> List[Dict[str, Any]]:
+        """
+        Get interactive web elements from current page (Playwright).
+        
+        Returns a simplified list of clickable/typeable elements with their
+        selectors and text content.
+        
+        Args:
+            max_elements: Maximum number of elements to return. Default is 50.
+        
+        Returns:
+            List of element dictionaries with 'selector', 'type', 'text', 'role'.
+        
+        Raises:
+            WebAutomationError: If unable to get elements.
+        
+        Example:
+            >>> controller = DesktopController()
+            >>> elements = controller.web_get_elements()
+            >>> for elem in elements:
+            ...     print(f"{elem['type']}: {elem['text'][:30]}")
+        """
+        if not self._ensure_browser_connection():
+            raise WebAutomationError("Playwright not connected to browser")
+        
+        try:
+            elements = []
+            
+            # Get interactive elements using accessibility tree
+            # This is more reliable than parsing full DOM
+            snapshot = self.page.accessibility.snapshot()
+            
+            def extract_elements(node: Dict[str, Any], depth: int = 0, max_depth: int = 10):
+                if depth > max_depth or len(elements) >= max_elements:
+                    return
+                
+                role = node.get('role', '')
+                name = node.get('name', '')
+                
+                # Only include interactive elements
+                if role in ['button', 'link', 'textbox', 'searchbox', 'combobox', 'menuitem']:
+                    # Generate a selector (simplified, may need refinement)
+                    selector = None
+                    if name:
+                        # Try to create a selector based on text content
+                        if role == 'button':
+                            selector = f'button:has-text("{name[:30]}")'
+                        elif role == 'link':
+                            selector = f'a:has-text("{name[:30]}")'
+                        elif role in ['textbox', 'searchbox']:
+                            selector = f'input[type="text"]'
+                    
+                    if selector or name:
+                        elements.append({
+                            'selector': selector or f'[role="{role}"]',
+                            'type': role,
+                            'text': name[:100] if name else '',
+                            'role': role
+                        })
+                
+                # Recurse into children
+                for child in node.get('children', []):
+                    extract_elements(child, depth + 1, max_depth)
+            
+            if snapshot:
+                extract_elements(snapshot)
+            
+            return elements[:max_elements]
+            
+        except Exception as e:
+            raise WebAutomationError(f"Failed to get web elements: {e}")
+    
+    def web_get_url(self) -> Optional[str]:
+        """
+        Get current page URL (Playwright).
+        
+        Returns:
+            Current URL or None if not connected.
+        """
+        if not self._ensure_browser_connection():
+            return None
+        
+        try:
+            return self.page.url
+        except Exception:
+            return None
+    
+    def close_playwright(self) -> None:
+        """
+        Close Playwright connection and cleanup.
+        
+        Call this when shutting down the controller.
+        """
+        if self.enable_playwright and hasattr(self, 'playwright_context'):
+            try:
+                if self.browser:
+                    self.browser.close()
+                self.playwright_context.stop()
+            except Exception:
+                pass

@@ -1,17 +1,202 @@
 """
 UI Tree Scanner Module
-Windows Accessibility API-based element detection and visualization.
+Hybrid vision architecture combining Windows Accessibility API and visual object detection.
 """
 
 from typing import List, Dict, Tuple, Optional, Any
 import uiautomation as auto
 from PIL import Image, ImageDraw, ImageFont
 import time
+import numpy as np
 
 
 class UIScannerError(Exception):
     """Exception raised when UI scanning fails."""
     pass
+
+
+class VisualDetector:
+    """
+    Visual object detection for UI elements using computer vision models.
+    
+    This class provides a placeholder/interface for integrating local detection
+    models like OmniParser, YOLO, or other visual recognition systems to detect
+    UI elements that may lack accessibility labels.
+    
+    Attributes:
+        model: The loaded detection model (placeholder for future integration).
+        confidence_threshold: Minimum confidence score for detections.
+        icon_categories: Categories of UI icons to detect.
+    """
+    
+    # Common UI icon types to detect
+    ICON_CATEGORIES = {
+        'hamburger_menu': 'Three horizontal lines menu icon',
+        'close_button': 'X or close icon',
+        'back_button': 'Left arrow or back icon',
+        'forward_button': 'Right arrow or forward icon',
+        'search_icon': 'Magnifying glass icon',
+        'settings_icon': 'Gear or cog icon',
+        'profile_icon': 'User silhouette icon',
+        'notification_icon': 'Bell icon',
+        'home_icon': 'House icon',
+        'share_icon': 'Share/export icon',
+        'like_button': 'Heart or thumbs up icon',
+        'comment_icon': 'Speech bubble icon',
+        'more_options': 'Three dots (vertical or horizontal)',
+        'download_icon': 'Download arrow icon',
+        'upload_icon': 'Upload arrow icon',
+    }
+    
+    def __init__(
+        self,
+        model_path: Optional[str] = None,
+        confidence_threshold: float = 0.5
+    ) -> None:
+        """
+        Initialize the Visual Detector.
+        
+        Args:
+            model_path: Path to the detection model weights (optional).
+            confidence_threshold: Minimum confidence for detections (0.0-1.0).
+        
+        Note:
+            This is a placeholder implementation. To integrate a real model:
+            1. Install model dependencies (e.g., ultralytics, torch, onnxruntime)
+            2. Load model weights in __init__
+            3. Implement actual detection in detect_elements()
+        
+        Example:
+            >>> detector = VisualDetector(confidence_threshold=0.6)
+            >>> # Future: detector = VisualDetector("models/ui_detector.pt")
+        """
+        self.model_path = model_path
+        self.confidence_threshold = confidence_threshold
+        self.model = None  # Placeholder for model instance
+        self.icon_categories = self.ICON_CATEGORIES
+        
+        # Future integration point
+        if model_path:
+            self._load_model(model_path)
+    
+    def _load_model(self, model_path: str) -> None:
+        """
+        Load the visual detection model.
+        
+        Args:
+            model_path: Path to model weights.
+        
+        Note:
+            Placeholder for future model loading logic.
+            Example implementations:
+            - YOLO: self.model = YOLO(model_path)
+            - OmniParser: self.model = OmniParser.load(model_path)
+            - ONNX Runtime: self.model = ort.InferenceSession(model_path)
+        """
+        # TODO: Implement model loading
+        # Example for YOLO:
+        # from ultralytics import YOLO
+        # self.model = YOLO(model_path)
+        print(f"⚠️  Visual detection model loading not yet implemented")
+        print(f"   Model path: {model_path}")
+    
+    def detect_elements(
+        self,
+        image: Image.Image,
+        detect_icons: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        Detect UI elements in an image using computer vision.
+        
+        Args:
+            image: PIL Image to analyze.
+            detect_icons: Whether to specifically detect icon elements.
+        
+        Returns:
+            List of detected elements with structure:
+            {
+                'source': 'vision',
+                'type': str,           # 'button', 'icon', 'text_field', etc.
+                'icon_type': str,      # Icon category if applicable
+                'rect': (x, y, w, h),  # Bounding box
+                'center': (x, y),      # Center coordinates
+                'confidence': float,   # Detection confidence (0.0-1.0)
+                'name': str            # Inferred name/description
+            }
+        
+        Note:
+            This is a placeholder. Real implementation would:
+            1. Preprocess image for model input
+            2. Run inference
+            3. Post-process detections
+            4. Filter by confidence threshold
+        
+        Example:
+            >>> detector = VisualDetector()
+            >>> screenshot = Image.open("screen.png")
+            >>> elements = detector.detect_elements(screenshot)
+        """
+        # Placeholder implementation
+        # In production, this would use the loaded model for detection
+        
+        if self.model is None:
+            # Return empty list if no model loaded
+            return []
+        
+        # TODO: Implement actual visual detection
+        # Example pseudo-code for YOLO:
+        # results = self.model(image, conf=self.confidence_threshold)
+        # detections = []
+        # for detection in results[0].boxes:
+        #     x1, y1, x2, y2 = detection.xyxy[0].tolist()
+        #     confidence = detection.conf[0].item()
+        #     class_id = int(detection.cls[0].item())
+        #     class_name = self.model.names[class_id]
+        #     
+        #     detections.append({
+        #         'source': 'vision',
+        #         'type': class_name,
+        #         'rect': (int(x1), int(y1), int(x2-x1), int(y2-y1)),
+        #         'center': (int((x1+x2)/2), int((y1+y2)/2)),
+        #         'confidence': confidence,
+        #         'name': f"{class_name} (visual)"
+        #     })
+        # 
+        # return detections
+        
+        return []
+    
+    def detect_icons(
+        self,
+        image: Image.Image,
+        icon_types: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Specifically detect UI icons that often lack accessibility labels.
+        
+        Args:
+            image: PIL Image to analyze.
+            icon_types: List of specific icon types to detect (None = all).
+        
+        Returns:
+            List of detected icon elements.
+        
+        Example:
+            >>> detector = VisualDetector()
+            >>> icons = detector.detect_icons(screenshot, ['hamburger_menu', 'close_button'])
+        """
+        # This would use specialized icon detection logic
+        # Could be a separate model or filtered results from main detector
+        
+        all_elements = self.detect_elements(image, detect_icons=True)
+        
+        if icon_types:
+            return [
+                elem for elem in all_elements
+                if elem.get('icon_type') in icon_types
+            ]
+        
+        return [elem for elem in all_elements if 'icon_type' in elem]
 
 
 class UIScanner:
@@ -63,6 +248,9 @@ class UIScanner:
         self.min_visible_area = min_visible_area
         self.max_depth = max_depth
         self.clickable_types = self.CLICKABLE_TYPES
+        
+        # Add source tag for hybrid architecture
+        self._element_source = 'api'
     
     def scan_active_window(
         self,
@@ -339,6 +527,7 @@ class UIScanner:
             
             return {
                 'id': element_id,
+                'source': 'api',  # Mark as API-detected element
                 'name': name,
                 'type': control_type_name,
                 'rect': (x, y, w, h),
@@ -354,7 +543,8 @@ class UIScanner:
         self,
         image: Image.Image,
         elements: List[Dict[str, Any]],
-        box_color: Tuple[int, int, int] = (0, 255, 0),  # Neon green
+        api_color: Tuple[int, int, int] = (0, 255, 0),  # Neon green for API
+        vision_color: Tuple[int, int, int] = (255, 165, 0),  # Orange for Vision
         text_color: Tuple[int, int, int] = (255, 255, 255),
         box_width: int = 2,
         show_labels: bool = True
@@ -364,11 +554,13 @@ class UIScanner:
         
         This creates a "Set-of-Marks" visualization where each interactive
         element is highlighted with a colored box and numbered ID.
+        Supports different colors for API-based vs Vision-based elements.
         
         Args:
             image: PIL Image to draw on.
-            elements: List of elements from scan_active_window().
-            box_color: RGB color for bounding boxes. Default is neon green.
+            elements: List of elements from scan_active_window() or hybrid scan.
+            api_color: RGB color for API-detected elements. Default is neon green.
+            vision_color: RGB color for vision-detected elements. Default is orange.
             text_color: RGB color for ID labels. Default is white.
             box_width: Width of bounding box lines. Default is 2.
             show_labels: Whether to show element names. Default is True.
@@ -403,8 +595,12 @@ class UIScanner:
             for element in elements:
                 elem_id = element['id']
                 x, y, w, h = element['rect']
-                name = element['name']
-                elem_type = element['type']
+                name = element.get('name', '')
+                elem_type = element.get('type', 'Unknown')
+                source = element.get('source', 'api')
+                
+                # Choose color based on element source
+                box_color = api_color if source == 'api' else vision_color
                 
                 # Draw bounding box
                 draw.rectangle(
@@ -539,13 +735,227 @@ class UIScanner:
             >>> elements = scanner.scan_active_window()
             >>> scanner.print_elements(elements)
         """
-        print(f"\n{'ID':<4} {'Type':<15} {'Name':<30} {'Center':<15}")
-        print("-" * 70)
+        print(f"\n{'ID':<4} {'Source':<8} {'Type':<15} {'Name':<30} {'Center':<15}")
+        print("-" * 80)
         
         for elem in elements:
-            elem_id = elem['id']
-            elem_type = elem['type']
-            name = elem['name'][:30] if elem['name'] else "(no name)"
+            elem_id = elem.get('id', '?')
+            source = elem.get('source', 'unknown')
+            elem_type = elem.get('type', 'Unknown')
+            name = elem.get('name', '(no name)')[:30]
             center = f"({elem['center'][0]}, {elem['center'][1]})"
             
-            print(f"{elem_id:<4} {elem_type:<15} {name:<30} {center:<15}")
+            print(f"{elem_id:<4} {source:<8} {elem_type:<15} {name:<30} {center:<15}")
+
+
+class HybridScanner:
+    """
+    Hybrid vision scanner combining Accessibility API and visual detection.
+    
+    This scanner merges elements from both Windows UI Automation and computer
+    vision models to provide comprehensive UI element detection, including
+    elements that lack accessibility labels (icons, images, etc.).
+    
+    Attributes:
+        ui_scanner: UIScanner instance for API-based detection.
+        visual_detector: VisualDetector instance for vision-based detection.
+        iou_threshold: Intersection over Union threshold for deduplication.
+    """
+    
+    def __init__(
+        self,
+        enable_visual: bool = False,
+        model_path: Optional[str] = None,
+        iou_threshold: float = 0.5,
+        **scanner_kwargs
+    ) -> None:
+        """
+        Initialize the Hybrid Scanner.
+        
+        Args:
+            enable_visual: Whether to enable visual detection (requires model).
+            model_path: Path to visual detection model weights.
+            iou_threshold: IoU threshold for merging duplicate elements (0.0-1.0).
+            **scanner_kwargs: Additional arguments passed to UIScanner.
+        
+        Example:
+            >>> # API-only mode (default)
+            >>> scanner = HybridScanner()
+            >>> 
+            >>> # Hybrid mode with visual detection
+            >>> scanner = HybridScanner(enable_visual=True, model_path="models/ui.pt")
+        """
+        self.ui_scanner = UIScanner(**scanner_kwargs)
+        self.visual_detector = VisualDetector(model_path) if enable_visual else None
+        self.iou_threshold = iou_threshold
+        self.enable_visual = enable_visual
+    
+    def scan(
+        self,
+        screenshot: Optional[Image.Image] = None,
+        detect_icons: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        Perform hybrid scan combining API and visual detection.
+        
+        Args:
+            screenshot: PIL Image for visual detection (required if enable_visual=True).
+            detect_icons: Whether to specifically detect UI icons.
+        
+        Returns:
+            Merged list of UI elements from both sources.
+        
+        Example:
+            >>> scanner = HybridScanner(enable_visual=True)
+            >>> from PIL import Image
+            >>> screenshot = Image.open("screen.png")
+            >>> elements = scanner.scan(screenshot)
+            >>> print(f"Found {len(elements)} total elements")
+        """
+        # Get API-based elements
+        api_elements = self.ui_scanner.scan_active_window()
+        
+        # Get vision-based elements if enabled
+        vision_elements = []
+        if self.enable_visual and self.visual_detector and screenshot:
+            vision_elements = self.visual_detector.detect_elements(
+                screenshot,
+                detect_icons=detect_icons
+            )
+        
+        # Merge elements and assign IDs
+        merged = self._merge_elements(api_elements, vision_elements)
+        
+        # Reassign sequential IDs
+        for idx, elem in enumerate(merged, start=1):
+            elem['id'] = idx
+        
+        return merged
+    
+    def _merge_elements(
+        self,
+        api_elements: List[Dict[str, Any]],
+        vision_elements: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Merge API and vision elements, removing duplicates using IoU.
+        
+        Strategy:
+        1. Keep all API elements (they're most reliable)
+        2. Add vision elements that don't overlap with API elements
+        3. Use IoU to determine overlaps
+        
+        Args:
+            api_elements: Elements from UI Automation API.
+            vision_elements: Elements from visual detection.
+        
+        Returns:
+            Merged list without duplicates.
+        """
+        merged = list(api_elements)  # Start with all API elements
+        
+        for vision_elem in vision_elements:
+            # Check if this vision element overlaps with any API element
+            is_duplicate = False
+            
+            for api_elem in api_elements:
+                iou = self._calculate_iou(
+                    vision_elem['rect'],
+                    api_elem['rect']
+                )
+                
+                if iou >= self.iou_threshold:
+                    # This vision element overlaps with an API element
+                    # API elements are more reliable, so skip this vision element
+                    is_duplicate = True
+                    break
+            
+            if not is_duplicate:
+                # This vision element is unique, add it
+                merged.append(vision_elem)
+        
+        return merged
+    
+    def _calculate_iou(
+        self,
+        rect1: Tuple[int, int, int, int],
+        rect2: Tuple[int, int, int, int]
+    ) -> float:
+        """
+        Calculate Intersection over Union (IoU) between two rectangles.
+        
+        Args:
+            rect1: (x, y, width, height) of first rectangle.
+            rect2: (x, y, width, height) of second rectangle.
+        
+        Returns:
+            IoU score (0.0 to 1.0).
+        
+        Example:
+            >>> scanner = HybridScanner()
+            >>> iou = scanner._calculate_iou((10, 10, 50, 50), (30, 30, 50, 50))
+            >>> print(f"Overlap: {iou:.2f}")
+        """
+        x1, y1, w1, h1 = rect1
+        x2, y2, w2, h2 = rect2
+        
+        # Convert to (x1, y1, x2, y2) format
+        box1 = [x1, y1, x1 + w1, y1 + h1]
+        box2 = [x2, y2, x2 + w2, y2 + h2]
+        
+        # Calculate intersection area
+        x_left = max(box1[0], box2[0])
+        y_top = max(box1[1], box2[1])
+        x_right = min(box1[2], box2[2])
+        y_bottom = min(box1[3], box2[3])
+        
+        if x_right < x_left or y_bottom < y_top:
+            # No intersection
+            return 0.0
+        
+        intersection_area = (x_right - x_left) * (y_bottom - y_top)
+        
+        # Calculate union area
+        box1_area = w1 * h1
+        box2_area = w2 * h2
+        union_area = box1_area + box2_area - intersection_area
+        
+        if union_area == 0:
+            return 0.0
+        
+        # Calculate IoU
+        iou = intersection_area / union_area
+        return iou
+    
+    def detect_unlabeled_icons(
+        self,
+        screenshot: Image.Image,
+        icon_types: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Specifically detect UI icons that lack accessibility labels.
+        
+        This is particularly useful for:
+        - Hamburger menus without text
+        - Icon-only buttons
+        - Social media icons
+        - Action icons (share, like, comment)
+        
+        Args:
+            screenshot: PIL Image to analyze.
+            icon_types: Specific icon types to detect (None = all).
+        
+        Returns:
+            List of detected icon elements.
+        
+        Example:
+            >>> scanner = HybridScanner(enable_visual=True)
+            >>> screenshot = Image.open("screen.png")
+            >>> icons = scanner.detect_unlabeled_icons(screenshot)
+            >>> print(f"Found {len(icons)} unlabeled icons")
+        """
+        if not self.visual_detector:
+            print("⚠️  Visual detection not enabled. Initialize with enable_visual=True")
+            return []
+        
+        return self.visual_detector.detect_icons(screenshot, icon_types)

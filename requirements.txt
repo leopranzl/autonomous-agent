@@ -10,5 +10,11 @@ pillow
 # Windows UI Automation (Accessibility API)
 uiautomation
 
+# Web automation (Playwright for precise browser control)
+playwright
+
+# Data processing
+numpy
+
 # Environment and security
 python-dotenv
