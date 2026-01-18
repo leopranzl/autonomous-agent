@@ -1,0 +1,11 @@
+# Autonomous AI Agent Dependencies
+# Google Gemini 2.0 API
+google-genai
+
+# Screen interaction and automation
+pyautogui
+mss
+pillow
+
+# Environment and security
+python-dotenv
